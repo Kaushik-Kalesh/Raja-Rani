@@ -1,6 +1,7 @@
 package io.kaushikkalesh.rajarani
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -9,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -18,7 +20,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import io.kaushikkalesh.rajarani.ui.theme.RajaRaniTheme
-import kotlin.random.Random
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,22 +39,46 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppNavigation(navController: NavHostController) {
+    val context = LocalContext.current
     NavHost(navController = navController, startDestination = "home/launch") {
         // Home screen UI
         composable("home/{flag}") { backStackEntry ->
             val flag = backStackEntry.arguments?.getString("flag") ?: ""
             HomePage(
                 onCreateRoom = {
-                    val roomCode = Random.nextInt(1000, 10000)
-                    navController.navigate("room/$roomCode")
+                    val call = RetrofitClient.apiService.createRoom()
+                    call.enqueue(object : Callback<Room> {
+                        override fun onResponse(call: Call<Room>, response: Response<Room>) {
+                            if (response.isSuccessful) {
+                                val roomCode = response.body()?.roomCode
+                                navController.navigate("room/$roomCode")
+                            }
+                        }
+
+                        override fun onFailure(call: Call<Room>, t: Throwable) {
+                            t.message?.let { Log.e("RR_Server", it, t) }
+                        }
+                    })
                 },
                 onJoinRoom = { roomCode ->
-                    if (roomCode in 1000..9999) {
-                        navController.navigate("room/$roomCode")
-                    } else {
-                        // Handle invalid room code
-                        navController.navigate("home/invalid-room")
-                    }
+                    val call = RetrofitClient.apiService.joinRoom(
+                        JoinRoomRequest(
+                            roomCode,
+                            "Kaushik"
+                        )
+                    )
+                    call.enqueue(object : Callback<Void> {
+                        override fun onResponse(call: Call<Void>, response: Response<Void>) {
+                            if (response.isSuccessful) {
+                                navController.navigate("room/$roomCode")
+                            }
+                        }
+
+                        override fun onFailure(call: Call<Void>, t: Throwable) {
+                            t.message?.let { Log.e("RR_Server", it, t) }
+                            navController.navigate("home/invalid-room")
+                        }
+                    })
                 },
                 isRoomValid = flag != "invalid-room"
             )
@@ -60,7 +88,7 @@ fun AppNavigation(navController: NavHostController) {
         composable("room/{roomCode}") { backStackEntry ->
             // Retrieve roomCode from arguments
             val roomCode = backStackEntry.arguments?.getString("roomCode") ?: ""
-            RoomPage(roomCode = roomCode.toInt())
+            RoomPage(roomCode = roomCode)
         }
     }
 }
@@ -68,7 +96,7 @@ fun AppNavigation(navController: NavHostController) {
 @Composable
 fun HomePage(
     onCreateRoom: () -> Unit,
-    onJoinRoom: (Int) -> Unit,
+    onJoinRoom: (String) -> Unit,
     isRoomValid: Boolean
 ) {
     var roomCode by remember { mutableStateOf("") }
@@ -117,7 +145,7 @@ fun HomePage(
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
-                onClick = { onJoinRoom(roomCode.toIntOrNull() ?: -1) },
+                onClick = { onJoinRoom(roomCode) },
                 modifier = Modifier
                     .height(48.dp)
             ) {
@@ -128,7 +156,20 @@ fun HomePage(
 }
 
 @Composable
-fun RoomPage(roomCode: Int) {
+fun RoomPage(roomCode: String) {
+    val socketManager = remember { SocketManager() }
+
+    LaunchedEffect(roomCode) {
+        socketManager.connect()
+        socketManager.joinRoom(roomCode)
+    }
+
+    DisposableEffect(roomCode) {
+        onDispose {
+            socketManager.emitPlayerLeft(roomCode)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
