@@ -40,7 +40,11 @@ android {
 }
 
 dependencies {
-
+    implementation(libs.retrofit2.retrofit)
+    implementation(libs.converter.gson)
+    implementation(libs.okhttp)
+    implementation(libs.logging.interceptor)
+    implementation(libs.socket.io.client)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
